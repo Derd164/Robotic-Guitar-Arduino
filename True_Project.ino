@@ -1,85 +1,195 @@
-#include <Servo.h>   // Include servo library
-const int capo = 0; // Change depending on where capo is for song.
-const int BPM = 160; // Change depending on beats per minute of song
-const int delay2 = 60000/BPM;
+#include <Servo.h>
 
-Servo serv1, serv2, serv3, serv4, serv5, serv6; // declaring servos
-bool Estate = 0, Astate = 0, Dstate = 0, Gstate = 0, Bstate = 0, estate = 0; // control pick direction
-const int fretPos[21] = {0 /*open*/, 1 /*first fret etc*/, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}; // Temporary fret location values to be callibrated later
-int Epos = 0, Apos = 0, Dpos = 0, Gpos = 0, Bpos = 0, epos = 0; // where the stepper motor is currently located
-int Estep = 0, Astep = 0, Dstep = 0, Gstep = 0, Bstep = 0, estep = 0; // How far the stepper motor needs to move from current position
+// Timing
+const int capo = 0;
+const int BPM = 160;
+const int delay2 = 60000 / BPM;
+const int SERVO_MOVE_TIME = 500;
 
+// Servo objects
+Servo serv1, serv2, serv3, serv4, serv5, serv6;
+
+// Servo directions/states
+bool Estate = 0;
+bool Astate = 0;
+bool Dstate = 0;
+bool Gstate = 0;
+bool Bstate = 0;
+bool estate = 0;
+
+// Temporary fret positions
+const int fretPos[20] = {
+  0, 175, 350, 500, 650,
+  780, 920, 1050, 1170, 1280,
+  1380, 1480, 1580, 14, 15,
+  16, 17, 18, 19, 20
+};
+
+// Current stepper positions
+int Epos = 0;
+int Apos = 0;
+int Dpos = 0;
+int Gpos = 0;
+int Bpos = 0;
+int epos = 0;
+
+// Stepper distances
+int Estep = 0;
+int Astep = 0;
+int Dstep = 0;
+int Gstep = 0;
+int Bstep = 0;
+int estep = 0;
+
+unsigned long fretElapsedTime = 0;
+
+// --------------------------------------------------
+// Initializing delay to avoid code upload chaos
+// --------------------------------------------------
+bool initDelayB = 1;
+void initDelay(void)
+{
+  if (initDelayB) delay(15000);
+  initDelayB = 0;
+}
+
+// --------------------------------------------------
+// Move all stepper motors to requested fret positions
+// --------------------------------------------------
 void fret(int E, int A, int D, int G, int B, int e) {
-  E += capo; A += capo; D += capo; G += capo; B += capo; e += capo; // desired fret + capo
-  Estep = fretPos[E] - Epos; // step size & new position = desired position - current position
-  digitalWrite(2, Estep < 0 ? 1 : 0); // change direction depending on if too high or too low. Might need to swap direction bools.
-  Astep = fretPos[A] - Apos;
-  digitalWrite(4, Astep < 0 ? 1 : 0);
-  Dstep = fretPos[D] - Dpos;
-  digitalWrite(6, Dstep < 0 ? 1 : 0);
-  Gstep = fretPos[G] - Gpos;
-  digitalWrite(8, Gstep < 0 ? 1 : 0);
-  Bstep = fretPos[B] - Bpos;
-  digitalWrite(10, Bstep < 0 ? 1 : 0);
-  estep = fretPos[e] - epos;
-  digitalWrite(12, estep < 0 ? 1 : 0);
+  unsigned long fretStartTime = micros();
 
-  bool Edone = 0, Adone = 0, Ddone = 0, Gdone = 0, Bdone = 0, edone = 0;
-  int Esteps = 0, Asteps = 0, Dsteps = 0, Gsteps = 0, Bsteps = 0, esteps = 0;
-  serv1.detach(); serv2.detach(); serv3.detach(); serv4.detach(); serv5.detach(); serv6.detach(); // detach all servo motors
-  digitalWrite(A0, LOW); // enable steppers, disable servos
-  while (!(Edone && Adone && Ddone && Gdone && Bdone && edone))
-  {
+  E += capo;
+  A += capo;
+  D += capo;
+  G += capo;
+  B += capo;
+  e += capo;
+
+  Estep = fretPos[E] - Epos;
+  Astep = fretPos[A] - Apos;
+  Dstep = fretPos[D] - Dpos;
+  Gstep = fretPos[G] - Gpos;
+  Bstep = fretPos[B] - Bpos;
+  estep = fretPos[e] - epos;
+
+  // Set stepper directions
+  digitalWrite(2, Estep < 0 ? HIGH : LOW);
+  digitalWrite(4, Astep < 0 ? HIGH : LOW);
+  digitalWrite(6, Dstep < 0 ? HIGH : LOW);
+  digitalWrite(8, Gstep < 0 ? HIGH : LOW);
+  digitalWrite(10, Bstep < 0 ? HIGH : LOW);
+  digitalWrite(12, estep < 0 ? LOW : HIGH);
+
+  // Detach servos before reusing their pins for steppers
+  serv1.detach();
+  serv2.detach();
+  serv3.detach();
+  serv4.detach();
+  serv5.detach();
+  serv6.detach();
+
+  // Enable steppers and disable servo operation
+  digitalWrite(A0, LOW);
+
+  bool Edone = false;
+  bool Adone = false;
+  bool Ddone = false;
+  bool Gdone = false;
+  bool Bdone = false;
+  bool edone = false;
+
+  int Esteps = 0;
+  int Asteps = 0;
+  int Dsteps = 0;
+  int Gsteps = 0;
+  int Bsteps = 0;
+  int esteps = 0;
+
+  while (!(Edone && Adone && Ddone && Gdone && Bdone && edone)) {
     if (Esteps < abs(Estep)) {
       digitalWrite(3, HIGH);
       Esteps++;
+    } else {
+      Edone = true;
     }
-    else Edone = 1;
+
     if (Asteps < abs(Astep)) {
       digitalWrite(5, HIGH);
       Asteps++;
+    } else {
+      Adone = true;
     }
-    else Adone = 1;
+
     if (Dsteps < abs(Dstep)) {
       digitalWrite(7, HIGH);
       Dsteps++;
+    } else {
+      Ddone = true;
     }
-    else Ddone = 1;
+
     if (Gsteps < abs(Gstep)) {
       digitalWrite(9, HIGH);
       Gsteps++;
+    } else {
+      Gdone = true;
     }
-    else Gdone = 1;
+
     if (Bsteps < abs(Bstep)) {
       digitalWrite(11, HIGH);
       Bsteps++;
+    } else {
+      Bdone = true;
     }
-    else Bdone = 1;
+
     if (esteps < abs(estep)) {
       digitalWrite(13, HIGH);
       esteps++;
+    } else {
+      edone = true;
     }
-    else edone = 1;
-    delayMicroseconds(50); // Tune to lowest possible once motor is acquired
+
+    delayMicroseconds(1000);
+
     digitalWrite(3, LOW);
     digitalWrite(5, LOW);
     digitalWrite(7, LOW);
     digitalWrite(9, LOW);
     digitalWrite(11, LOW);
     digitalWrite(13, LOW);
-    delayMicroseconds(50); // Tune to lowest possible once motor is acquired
+
+    delayMicroseconds(1000);
   }
+
+  // Save the new positions
   Epos = fretPos[E];
   Apos = fretPos[A];
   Dpos = fretPos[D];
   Gpos = fretPos[G];
   Bpos = fretPos[B];
   epos = fretPos[e];
+
+  fretElapsedTime = micros() - fretStartTime;
+
+  // Disable steppers after movement is complete
+  digitalWrite(A0, HIGH);
 }
 
-void pick(bool E, bool A, bool D, bool G, bool B, bool e) {
-  
-  digitalWrite(A0, HIGH); // enable servos, disable steppers
+// --------------------------------------------------
+// Pick selected strings with servos
+// --------------------------------------------------
+void pick(bool E, bool A, bool D, bool G, bool B, bool e, int noteDivision) {
+  unsigned long noteDuration =
+    (delay2 * 4000UL) / noteDivision;
+
+  if (fretElapsedTime < noteDuration) {
+    delay((noteDuration - fretElapsedTime) / 1000UL);
+  }
+
+  // Disable steppers BEFORE generating servo pulses
+  digitalWrite(A0, HIGH);
+  delayMicroseconds(20);
+
   if (E) {
     serv1.attach(3);
     Estate = !Estate;
@@ -115,22 +225,112 @@ void pick(bool E, bool A, bool D, bool G, bool B, bool e) {
     estate = !estate;
     serv6.write(estate ? 140 : 70);
   }
+
+  // Let the servos finish moving
+  delay(SERVO_MOVE_TIME);
+
+  // Stop servo pulses to reduce buzzing
+  serv1.detach();
+  serv2.detach();
+  serv3.detach();
+  serv4.detach();
+  serv5.detach();
+  serv6.detach();
+
+  // Ensure shared STEP pins are LOW after detaching
+  digitalWrite(3, LOW);
+  digitalWrite(5, LOW);
+  digitalWrite(7, LOW);
+  digitalWrite(9, LOW);
+  digitalWrite(11, LOW);
+  digitalWrite(13, LOW);
+
+  // Keep steppers disabled during servo operation
+  digitalWrite(A0, HIGH);
 }
 
+// --------------------------------------------------
+// Setup
+// --------------------------------------------------
 void setup() {
-  // put your setup code here, to run once:
   pinMode(A0, OUTPUT);
-  for (int pin = 2; pin <= 13; pin++) { // set all digital pins to output
-  pinMode(pin, OUTPUT);
-  }
+  digitalWrite(A0, HIGH);
 
+  for (int pin = 2; pin <= 13; pin++) {
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, LOW);
+  }
 }
 
+// --------------------------------------------------
+// Main loop
+// --------------------------------------------------
 void loop() {
-  // put your main code here, to run repeatedly:
-  // pick(1, 1, 1, 1, 1, 1); // Pick the string
-  fret(5, 5, 5, 5, 5, 5); // Move to next position
-  delay(delay2); // Wait 1 second
-  fret(0, 0, 0, 0, 0, 0);
-  delay(delay2); // Wait 1 second
+  initDelay(); // Don't touch this line
+  // "Smoke on the Water" demo song
+  fret(0, 0, 0, 0, 0, 4);
+  pick(0, 0, 0, 0, 0, 1, 4);
+  fret(0, 0, 0, 0, 0, 7);
+  pick(0, 0, 0, 0, 0, 1, 4);
+  fret(0, 0, 0, 0, 0, 9);
+  pick(0, 0, 0, 0, 0, 1, 2);
+  
+  fret(0, 0, 0, 0, 0, 4);
+  pick(0, 0, 0, 0, 0, 1, 4);
+  fret(0, 0, 0, 0, 0, 7);
+  pick(0, 0, 0, 0, 0, 1, 4);
+  fret(0, 0, 0, 0, 0, 10);
+  pick(0, 0, 0, 0, 0, 1, 4);
+  fret(0, 0, 0, 0, 0, 9);
+  pick(0, 0, 0, 0, 0, 1, 2);
+
+  fret(0, 0, 0, 0, 0, 4);
+  pick(0, 0, 0, 0, 0, 1, 4);
+  fret(0, 0, 0, 0, 0, 7);
+  pick(0, 0, 0, 0, 0, 1, 4);
+  fret(0, 0, 0, 0, 0, 9);
+  pick(0, 0, 0, 0, 0, 1, 2);
+
+  fret(0, 0, 0, 0, 0, 4);
+  pick(0, 0, 0, 0, 0, 1, 4);
+  fret(0, 0, 0, 0, 0, 7);
+  pick(0, 0, 0, 0, 0, 1, 4);
+  // pick(1, 1, 1, 1, 1, 1, 4);
+  // pick(1, 1, 1, 1, 1, 1, 4);
+  // pick(1, 0, 0, 0, 0, 0, 4);
+  // delay(500);
+  // pick(1, 0, 0, 0, 0, 0, 4);
+  // delay(500);
+  // pick(0, 0, 0, 0, 0, 1, 4);
+  // delay(500);
+  // pick(0, 0, 0, 0, 0, 1, 4);
+  // delay(500);
+  // fret(5, 5, 5, 5, 5, 5);
+  // fret(1, 1, 1, 1, 1, 1);
+  // fret(0, 0, 0, 0, 0, 0);
+  // delay(2000);
+  // fret(0, 0, 0, 0, 0, 1);
+  // delay(2000);
+  // fret(0, 0, 0, 0, 0, 2);
+  // delay(2000);
+  // fret(0, 0, 0, 0, 0, 3);
+  // delay(2000);
+  // fret(0, 0, 0, 0, 0, 4);
+  // delay(2000);
+  // fret(0, 0, 0, 0, 0, 5);
+  // delay(2000);
+  // fret(0, 0, 0, 0, 0, 6);
+  // delay(2000);
+  // fret(0, 0, 0, 0, 0, 7);
+  // delay(2000);
+  // fret(0, 0, 0, 0, 0, 8);
+  // delay(2000);
+  // fret(0, 0, 0, 0, 0, 9);
+  // delay(2000);
+  // fret(0, 0, 0, 0, 0, 10);
+  // delay(2000);
+  // fret(0, 0, 0, 0, 0, 11);
+  // delay(2000);
+  // fret(0, 0, 0, 0, 0, 12);
+  // delay(2000);
 }
